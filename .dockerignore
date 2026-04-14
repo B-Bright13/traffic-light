@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+*.pyc
+__pycache__
+.venv
+venv
+.venv/
+.pytest_cache
+*.log
+.DS_Store
+README.md
+LICENSE
+tests/
+docs/

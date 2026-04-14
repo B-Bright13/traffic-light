@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Traffic Light API</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Glow animations for each light */
+    @keyframes glow-red {
+      0%, 100% { box-shadow: 0 0 20px 6px rgba(239,68,68,0.7), 0 0 60px 20px rgba(239,68,68,0.3); }
+      50%       { box-shadow: 0 0 30px 12px rgba(239,68,68,0.9), 0 0 80px 30px rgba(239,68,68,0.5); }
+    }
+    @keyframes glow-yellow {
+      0%, 100% { box-shadow: 0 0 20px 6px rgba(234,179,8,0.7), 0 0 60px 20px rgba(234,179,8,0.3); }
+      50%       { box-shadow: 0 0 30px 12px rgba(234,179,8,0.9), 0 0 80px 30px rgba(234,179,8,0.5); }
+    }
+    @keyframes glow-green {
+      0%, 100% { box-shadow: 0 0 20px 6px rgba(34,197,94,0.7), 0 0 60px 20px rgba(34,197,94,0.3); }
+      50%       { box-shadow: 0 0 30px 12px rgba(34,197,94,0.9), 0 0 80px 30px rgba(34,197,94,0.5); }
+    }
+    .light-red.lit    { background-color: #ef4444; animation: glow-red    1.8s ease-in-out infinite; }
+    .light-yellow.lit { background-color: #eab308; animation: glow-yellow 1.8s ease-in-out infinite; }
+    .light-green.lit  { background-color: #22c55e; animation: glow-green  1.8s ease-in-out infinite; }
+
+    .light-red.dim    { background-color: #3f1010; }
+    .light-yellow.dim { background-color: #3f2f00; }
+    .light-green.dim  { background-color: #0a2e14; }
+
+    /* SSE pulse indicator */
+    @keyframes live-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    .live-dot { animation: live-pulse 1.5s ease-in-out infinite; }
+
+    /* Smooth color transition on housing border */
+    .housing-border { transition: border-color 0.4s ease, box-shadow 0.4s ease; }
+
+    /* Scrollbar styling for response areas */
+    .response-area::-webkit-scrollbar { width: 6px; }
+    .response-area::-webkit-scrollbar-track { background: #1e293b; border-radius: 3px; }
+    .response-area::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">🚦</span>
+        <div>
+          <h1 class="text-lg font-bold text-white tracking-tight">Traffic Light API</h1>
+          <p class="text-xs text-gray-400">Python · Flask · Real-time SSE</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <span id="live-dot" class="live-dot w-2 h-2 rounded-full bg-gray-500 inline-block"></span>
+        <span id="live-label" class="text-gray-500">Connecting…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+    <!-- ── Left Panel: Traffic Light + Controls ── -->
+    <section class="flex flex-col gap-6">
+
+      <!-- Traffic Light Visual -->
+      <div class="bg-gray-900 rounded-2xl border border-gray-800 p-8 flex flex-col items-center gap-4">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">Live Signal</h2>
+
+        <!-- Housing -->
+        <div id="housing"
+             class="housing-border bg-gray-800 rounded-3xl border-4 border-gray-700 p-6 flex flex-col gap-5 shadow-2xl w-36">
+          <div id="light-red"    class="light-red    dim w-20 h-20 rounded-full mx-auto transition-all duration-500 cursor-pointer hover:opacity-80" onclick="setColor('red')"></div>
+          <div id="light-yellow" class="light-yellow dim w-20 h-20 rounded-full mx-auto transition-all duration-500 cursor-pointer hover:opacity-80" onclick="setColor('yellow')"></div>
+          <div id="light-green"  class="light-green  dim w-20 h-20 rounded-full mx-auto transition-all duration-500 cursor-pointer hover:opacity-80" onclick="setColor('green')"></div>
+        </div>
+
+        <!-- Status badge -->
+        <div class="flex flex-col items-center gap-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">Active:</span>
+            <span id="status-badge"
+                  class="px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wider bg-gray-700 text-gray-300">
+              —
+            </span>
+          </div>
+          <p id="status-meaning" class="text-xs text-gray-500">—</p>
+          <p id="status-time"    class="text-xs text-gray-600">—</p>
+        </div>
+      </div>
+
+      <!-- Quick Controls -->
+      <div class="bg-gray-900 rounded-2xl border border-gray-800 p-6">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">Quick Controls</h2>
+        <div class="grid grid-cols-3 gap-3">
+          <button onclick="setColor('red')"
+                  class="py-3 rounded-xl font-bold text-sm uppercase tracking-wider
+                         bg-red-950 text-red-400 border border-red-800
+                         hover:bg-red-900 hover:text-red-300 hover:border-red-600
+                         active:scale-95 transition-all duration-150">
+            🔴 Red
+          </button>
+          <button onclick="setColor('yellow')"
+                  class="py-3 rounded-xl font-bold text-sm uppercase tracking-wider
+                         bg-yellow-950 text-yellow-400 border border-yellow-800
+                         hover:bg-yellow-900 hover:text-yellow-300 hover:border-yellow-600
+                         active:scale-95 transition-all duration-150">
+            🟡 Yellow
+          </button>
+          <button onclick="setColor('green')"
+                  class="py-3 rounded-xl font-bold text-sm uppercase tracking-wider
+                         bg-green-950 text-green-400 border border-green-800
+                         hover:bg-green-900 hover:text-green-300 hover:border-green-600
+                         active:scale-95 transition-all duration-150">
+            🟢 Green
+          </button>
+        </div>
+        <p class="text-xs text-gray-600 mt-3 text-center">
+          Click a button or a light directly — changes broadcast live to all clients
+        </p>
+      </div>
+
+      <!-- Base URL hint -->
+      <div class="bg-gray-900/60 rounded-xl border border-gray-800 px-5 py-4">
+        <p class="text-xs text-gray-500 mb-1 uppercase tracking-widest">Base URL</p>
+        <code id="base-url" class="text-sm text-indigo-300 break-all">http://localhost:5002</code>
+      </div>
+    </section>
+
+    <!-- ── Right Panel: API Reference / Explorer ── -->
+    <section class="flex flex-col gap-4">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest">API Reference &amp; Explorer</h2>
+
+      <!-- GET /api/status -->
+      <div class="api-card bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        <div class="p-5 flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900 text-emerald-300">GET</span>
+              <code class="text-sm text-indigo-300">/api/status</code>
+            </div>
+            <p class="text-sm text-gray-400">Returns the currently active light color and metadata.</p>
+          </div>
+          <button onclick="tryEndpoint('GET','/api/status',null,'resp-status')"
+                  class="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-gray-800 text-gray-300 border border-gray-700
+                         hover:bg-gray-700 hover:text-white transition-colors">
+            Try it ▶
+          </button>
+        </div>
+        <div class="border-t border-gray-800 px-5 py-3 bg-gray-950/50">
+          <p class="text-xs text-gray-500 mb-2">Response</p>
+          <pre id="resp-status" class="response-area text-xs text-gray-300 bg-gray-900 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap hidden"></pre>
+          <pre class="text-xs text-gray-600 bg-transparent">{
+  "active": "red",
+  "updated_at": "2026-04-14T12:00:00+00:00",
+  "color_info": { "label": "Red", "meaning": "Stop", "hex": "#ef4444" }
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /api/colors -->
+      <div class="api-card bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        <div class="p-5 flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900 text-emerald-300">GET</span>
+              <code class="text-sm text-indigo-300">/api/colors</code>
+            </div>
+            <p class="text-sm text-gray-400">Lists all valid colors with labels, meanings, and hex values.</p>
+          </div>
+          <button onclick="tryEndpoint('GET','/api/colors',null,'resp-colors')"
+                  class="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-gray-800 text-gray-300 border border-gray-700
+                         hover:bg-gray-700 hover:text-white transition-colors">
+            Try it ▶
+          </button>
+        </div>
+        <div class="border-t border-gray-800 px-5 py-3 bg-gray-950/50">
+          <p class="text-xs text-gray-500 mb-2">Response</p>
+          <pre id="resp-colors" class="response-area text-xs text-gray-300 bg-gray-900 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap hidden"></pre>
+          <pre class="text-xs text-gray-600 bg-transparent">{
+  "colors": ["red", "yellow", "green"],
+  "details": { "red": { "label": "Red", "meaning": "Stop", ... }, ... }
+}</pre>
+        </div>
+      </div>
+
+      <!-- POST /api/set -->
+      <div class="api-card bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        <div class="p-5 flex items-start gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-2 py-0.5 rounded text-xs font-bold bg-blue-900 text-blue-300">POST</span>
+              <code class="text-sm text-indigo-300">/api/set</code>
+            </div>
+            <p class="text-sm text-gray-400 mb-3">Sets the active light. Broadcasts the change to all SSE clients.</p>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-500">Body <code class="text-gray-400">color</code>:</label>
+              <select id="set-color-input"
+                      class="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg px-3 py-1.5
+                             focus:outline-none focus:border-indigo-500">
+                <option value="red">red</option>
+                <option value="yellow">yellow</option>
+                <option value="green">green</option>
+              </select>
+              <button onclick="trySet()"
+                      class="px-3 py-1.5 rounded-lg text-xs font-semibold
+                             bg-blue-900 text-blue-300 border border-blue-700
+                             hover:bg-blue-800 hover:text-white transition-colors">
+                Try it ▶
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="border-t border-gray-800 px-5 py-3 bg-gray-950/50">
+          <p class="text-xs text-gray-500 mb-2">Example request body</p>
+          <pre class="text-xs text-gray-600 bg-transparent">{ "color": "green" }</pre>
+          <pre id="resp-set" class="response-area text-xs text-gray-300 bg-gray-900 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap mt-2 hidden"></pre>
+        </div>
+      </div>
+
+      <!-- GET /api/stream -->
+      <div class="api-card bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        <div class="p-5 flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900 text-emerald-300">GET</span>
+              <code class="text-sm text-indigo-300">/api/stream</code>
+            </div>
+            <p class="text-sm text-gray-400">
+              Server-Sent Events stream. Connect with
+              <code class="text-indigo-400">EventSource</code> to receive real-time updates.
+              Sends a heartbeat comment every ~25 s to keep the connection alive.
+            </p>
+          </div>
+        </div>
+        <div class="border-t border-gray-800 px-5 py-3 bg-gray-950/50">
+          <p class="text-xs text-gray-500 mb-2">Example client</p>
+          <pre class="text-xs text-gray-600 bg-transparent">const es = new EventSource('/api/stream');
+es.onmessage = (e) =&gt; {
+  const state = JSON.parse(e.data);
+  console.log(state.active); // "green"
+};</pre>
+          <div id="sse-log-wrap" class="mt-3">
+            <p class="text-xs text-gray-500 mb-1">Live SSE events (this tab)</p>
+            <div id="sse-log"
+                 class="response-area text-xs text-gray-400 bg-gray-900 rounded-lg p-3 overflow-auto max-h-32 font-mono">
+              <span class="text-gray-600">Waiting for events…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GET /health -->
+      <div class="api-card bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+        <div class="p-5 flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-900 text-emerald-300">GET</span>
+              <code class="text-sm text-indigo-300">/health</code>
+            </div>
+            <p class="text-sm text-gray-400">Health check endpoint. Always returns 200 when the service is running.</p>
+          </div>
+          <button onclick="tryEndpoint('GET','/health',null,'resp-health')"
+                  class="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-gray-800 text-gray-300 border border-gray-700
+                         hover:bg-gray-700 hover:text-white transition-colors">
+            Try it ▶
+          </button>
+        </div>
+        <div class="border-t border-gray-800 px-5 py-3 bg-gray-950/50">
+          <pre id="resp-health" class="response-area text-xs text-gray-300 bg-gray-900 rounded-lg p-3 overflow-auto max-h-32 whitespace-pre-wrap hidden"></pre>
+          <pre class="text-xs text-gray-600 bg-transparent">{ "status": "healthy", "service": "traffic-light", "version": "1.0.0" }</pre>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Toast notification -->
+  <div id="toast"
+       class="fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-xl
+              transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50
+              bg-gray-800 border border-gray-700 text-gray-200">
+  </div>
+
+<script>
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const MEANINGS = { red: 'Stop', yellow: 'Caution', green: 'Go' };
+  const COLOR_CLASSES = {
+    red:    { badge: 'bg-red-900 text-red-300',    housing: 'border-red-700 shadow-red-900/40' },
+    yellow: { badge: 'bg-yellow-900 text-yellow-300', housing: 'border-yellow-700 shadow-yellow-900/40' },
+    green:  { badge: 'bg-green-900 text-green-300', housing: 'border-green-700 shadow-green-900/40' },
+  };
+
+  function showToast(msg, ok = true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = t.className.replace(/bg-\S+|border-\S+|text-\S+/g, '').trim();
+    t.classList.add(
+      ok ? 'bg-green-900' : 'bg-red-900',
+      ok ? 'border-green-700' : 'border-red-700',
+      ok ? 'text-green-200' : 'text-red-200'
+    );
+    t.classList.remove('opacity-0', 'translate-y-4');
+    t.classList.add('opacity-100', 'translate-y-0');
+    setTimeout(() => {
+      t.classList.remove('opacity-100', 'translate-y-0');
+      t.classList.add('opacity-0', 'translate-y-4');
+    }, 2500);
+  }
+
+  function fmtTime(iso) {
+    try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+  }
+
+  // ── Update UI ─────────────────────────────────────────────────────────────
+  function applyState(state) {
+    const { active, updated_at } = state;
+    ['red','yellow','green'].forEach(c => {
+      const el = document.getElementById('light-' + c);
+      el.className = el.className.replace(/\blit\b|\bdim\b/, '');
+      el.classList.add(active === c ? 'lit' : 'dim');
+    });
+
+    const badge = document.getElementById('status-badge');
+    const cc = COLOR_CLASSES[active];
+    badge.className = `px-3 py-1 rounded-full text-sm font-bold uppercase tracking-wider ${cc.badge}`;
+    badge.textContent = active;
+
+    document.getElementById('status-meaning').textContent = MEANINGS[active] || '';
+    document.getElementById('status-time').textContent = 'Updated ' + fmtTime(updated_at);
+
+    const housing = document.getElementById('housing');
+    housing.className = housing.className
+      .replace(/border-\S+-700/g, '')
+      .replace(/shadow-\S+-900\/40/g, '')
+      .trim();
+    housing.classList.add(...cc.housing.split(' '));
+  }
+
+  // ── SSE ───────────────────────────────────────────────────────────────────
+  let sseEventCount = 0;
+
+  function initSSE() {
+    const liveDot   = document.getElementById('live-dot');
+    const liveLabel = document.getElementById('live-label');
+    const sseLog    = document.getElementById('sse-log');
+
+    const es = new EventSource('/api/stream');
+
+    es.onopen = () => {
+      liveDot.classList.remove('bg-gray-500', 'bg-red-500');
+      liveDot.classList.add('bg-green-400');
+      liveLabel.textContent = 'Live';
+      liveLabel.className = 'text-green-400 text-xs';
+    };
+
+    es.onmessage = (e) => {
+      const state = JSON.parse(e.data);
+      applyState(state);
+
+      sseEventCount++;
+      const line = document.createElement('div');
+      line.className = 'text-green-400';
+      line.textContent = `[${fmtTime(state.updated_at)}] active="${state.active}"`;
+      if (sseLog.querySelector('.text-gray-600')) sseLog.innerHTML = '';
+      sseLog.prepend(line);
+      if (sseLog.children.length > 20) sseLog.removeChild(sseLog.lastChild);
+    };
+
+    es.onerror = () => {
+      liveDot.classList.remove('bg-green-400');
+      liveDot.classList.add('bg-red-500');
+      liveLabel.textContent = 'Reconnecting…';
+      liveLabel.className = 'text-red-400 text-xs';
+    };
+  }
+
+  // ── API Explorer ──────────────────────────────────────────────────────────
+  async function tryEndpoint(method, path, body, respId) {
+    const el = document.getElementById(respId);
+    el.classList.remove('hidden');
+    el.textContent = 'Loading…';
+    el.className = el.className.replace(/text-red-400|text-gray-300/, '') + ' text-gray-300';
+    try {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      el.textContent = JSON.stringify(data, null, 2);
+      if (!res.ok) {
+        el.className = el.className.replace('text-gray-300', '') + ' text-red-400';
+      }
+    } catch (err) {
+      el.textContent = 'Error: ' + err.message;
+      el.className = el.className.replace('text-gray-300', '') + ' text-red-400';
+    }
+  }
+
+  async function trySet() {
+    const color = document.getElementById('set-color-input').value;
+    await tryEndpoint('POST', '/api/set', { color }, 'resp-set');
+  }
+
+  async function setColor(color) {
+    try {
+      const res = await fetch('/api/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Light set to ${color.toUpperCase()} ✓`);
+      } else {
+        showToast(data.error || 'Failed to set color', false);
+      }
+    } catch (err) {
+      showToast('Network error: ' + err.message, false);
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  document.getElementById('base-url').textContent = window.location.origin;
+  initSSE();
+</script>
+</body>
+</html>
